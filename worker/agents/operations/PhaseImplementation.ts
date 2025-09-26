@@ -270,10 +270,10 @@ The README should be professional, well-structured, and provide clear instructio
 - Do not add any images or screenshots
 - Include project title, description, and key features from the blueprint
 - Add technology stack section based on the template dependencies
-- Include setup/installation instructions using bun (not npm/yarn)
-- Add usage examples and development instructions
-- Include a deployment section with Cloudflare-specific instructions
-- **IMPORTANT**: Add a \`[cloudflarebutton]\` placeholder near the top and another in the deployment section for the Cloudflare deploy button. Write the **EXACT** string except the backticks and DON'T enclose it in any other button or anything. We will replace it with https://deploy.workers.cloudflare.com/?url=\${repositoryUrl\} when the repository is created.
+- Provide setup instructions that create/activate a Python virtualenv (e.g., `python -m venv .venv`, `source .venv/bin/activate`) and install dependencies with `pip install -r requirements.txt`
+- Document the essential Django management commands: `python manage.py migrate`, `python manage.py collectstatic --noinput`, and `python manage.py runserver`
+- Add usage and development notes that highlight Django REST Framework API examples and HTMX interaction patterns
+- Include a deployment section that explains how to kick off the DigitalOcean droplet workflow (e.g., describing the API-triggered provisioning or referencing the repository's deployment command)
 - Structure the content clearly with appropriate headers and sections
 - Be concise but comprehensive - focus on essential information
 - Use professional tone suitable for open source projects
