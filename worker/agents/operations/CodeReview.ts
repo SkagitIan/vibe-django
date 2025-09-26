@@ -12,7 +12,7 @@ export interface CodeReviewInputs {
     issues: IssueReport
 }
 
-const SYSTEM_PROMPT = `You are a Senior Software Engineer at Cloudflare specializing in comprehensive Django + HTMX + DRF application analysis. Your mandate is to identify ALL critical issues across the ENTIRE codebase that could impact functionality, user experience, deployment, or preview tooling.
+const SYSTEM_PROMPT = `You are a Senior Software Engineer on the DigitalOcean delivery team specializing in comprehensive Django + HTMX + DRF application analysis. Your mandate is to identify ALL critical issues across the ENTIRE codebase that could impact functionality, user experience, deployment, or preview tooling.
 
 ## COMPREHENSIVE ISSUE DETECTION PRIORITIES:
 

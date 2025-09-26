@@ -84,12 +84,12 @@ export function handleWebSocketMessage(agent: SimpleCodeGeneratorAgent, connecti
                 });
                 break;
             case WebSocketMessageRequests.DEPLOY:
-                agent.deployToCloudflare().then((deploymentResult) => {
+                agent.deployToDigitalOceanDroplet().then((deploymentResult) => {
                     if (!deploymentResult) {
-                        logger.error('Failed to deploy to Cloudflare Workers');
+                        logger.error('Failed to deploy to DigitalOcean');
                         return;
                     }
-                    logger.info('Successfully deployed to Cloudflare Workers!', deploymentResult);
+                    logger.info('Successfully provisioned DigitalOcean droplet', deploymentResult);
                 }).catch((error: unknown) => {
                     logger.error('Error during deployment:', error);
                 });

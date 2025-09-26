@@ -71,19 +71,14 @@ ${template.redactedFiles.join('\n')}
         } else {
             return `
 <START_FROM_SCRATCH>
-No starter template is available—design the entire structure yourself. You need to write all the configuration files, package.json, and all the source code files from scratch.
-You are allowed to install stuff. Be very careful with the versions of libraries and frameworks you choose.
-For an example typescript vite project,
-The project should support the following commands in package.json to run the application:
-"scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "npm run build && vite preview",
-    "deploy": "npm run build && wrangler deploy",
-    "cf-typegen": "wrangler types"
-}
-and provide a preview url for the application.
+No starter template is available—design the entire Django + HTMX application structure yourself. You must create the project configuration (manage.py, settings modules, ASGI/WSGI entrypoints), core apps, templates, static asset pipeline (Tailwind/PostCSS or similar), Django REST Framework endpoints, and deployment scripts from scratch.
+You are allowed to install Python packages using pip or Poetry. Pin compatible versions in requirements.txt or pyproject.toml and document environment variables with a .env.example file. Prefer Python 3.12+ and isolate dependencies inside a virtual environment (python -m venv .venv && source .venv/bin/activate).
+The project must expose clear developer workflows using standard Django commands:
+- python manage.py migrate
+- python manage.py collectstatic --noinput
+- python manage.py runserver 0.0.0.0:8000
+- python manage.py createsuperuser (when admin access is required)
+Include management scripts or Procfiles needed for gunicorn/uvicorn so the project can be deployed on a DigitalOcean Droplet. Document how to run Tailwind build/watch tasks if applicable.
 
 </START_FROM_SCRATCH>`;
         }
@@ -657,13 +652,13 @@ export const STRATEGIES = {
     ${STRATEGIES_UTILS.CONSTRAINTS}
 
     **No need to add accessibility features. Focus on delivering an actually feature-wise polished and complete application in as few phases as possible.**
-    **Always stick to existing project/template patterns. Respect and work with existing worker bindings rather than making custom ones**
-    **Rely on open source tools and free tier services only apart from whats configured in the environment. Refer to template usage instructions to know if specific cloudflare services are also available for use.**
+    **Always stick to existing project/template patterns. Respect the Django settings, app layout, Tailwind pipeline, and HTMX helpers that ship with the template.**
+    **Use pip or Poetry for any new Python dependencies and favour well-supported Django ecosystem packages (django-allauth, django-htmx, django-filter, drf-spectacular, whitenoise, django-environ, etc.). Document virtualenv activation and installation commands.**
     **Make sure to implement all the features and functionality requested by the user and more. The application should be fully complete by the end of the last phase. There should be no compromises**
-    **This is a Cloudflare Workers & Durable Objects project. The environment is preconfigured. Absolutely DO NOT Propose changes to wrangler.toml or any other config files. These config files are hidden from you but they do exist.**
-    **The Homepage of the frontend is a dummy page. It should be rewritten as the primary page of the application in the initial phase.**
-    **Refrain from editing any of the 'dont touch' files in the project, e.g - package.json, vite.config.ts, wrangler.jsonc, etc.**
-</PHASES GENERATION STRATEGY>`, 
+    **This project is deployed to a DigitalOcean Droplet using gunicorn/uvicorn and systemd/nginx scripts. Do NOT propose altering droplet provisioning or base deployment scripts beyond what the template explicitly exposes.**
+    **The Homepage of the frontend is a dummy page. It should be rewritten as the primary page of the application in the initial phase. Ensure base templates, urls.py, and views.py all line up.**
+    **Refrain from editing any of the 'dont touch' files in the project (e.g., deployment scripts, Dockerfiles, or secret management). Work within the provided Django apps, templates, and static directories.**
+</PHASES GENERATION STRATEGY>`,
 FRONTEND_FIRST_CODING: `<PHASES GENERATION STRATEGY>
     **STRATEGY: Scalable, Demoable Frontend and core application First / Iterative Feature Addition later**
     The project would be developed live: The user (client) would be provided a preview link after each phase. This is our rapid development and delivery paradigm.
