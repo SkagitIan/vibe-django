@@ -30,7 +30,7 @@ const SYSTEM_PROMPT = `You are a Senior Software Engineer at Cloudflare speciali
 - Verify the reported issue actually exists in current code
 - Ensure your fix targets the exact problem described
 - Maintain all existing error boundaries and null checks
-- Preserve existing React patterns (hooks, effects, state)
+- Preserve existing Django app structure, template inheritance, and HTMX/DRF patterns
 - Keep the same component structure and props
 
 Your goal is zero regression - fix the issue without breaking anything else.`
@@ -79,20 +79,19 @@ const total = data?.items?.length || 0;
 \`\`\`
 </fix>
 
-**Example - Render Loop Fix:**
-Issue: "Maximum update depth exceeded in useEffect"
+**Example - Missing Context Fix:**
+Issue: "KeyError: 'stats' in dashboard template"
 <fix>
-# Add missing dependency array to prevent infinite loop
+# Provide safe default context so template renders
 
 \`\`\`
 <<<<<<< SEARCH
-useEffect(() => {
-  setState(newValue);
-});
+return render(request, "dashboard/index.html", {})
 =======
-useEffect(() => {
-  setState(newValue);
-}, [newValue]);
+context = {
+    "stats": get_stats() or [],
+}
+return render(request, "dashboard/index.html", context)
 >>>>>>> REPLACE
 \`\`\`
 </fix>

@@ -23,8 +23,8 @@ export interface RealtimeCodeFixerContext {
     template: TemplateDetails;
 }
 
-const SYSTEM_PROMPT = `You are a seasoned, highly experienced code inspection officer and senior full-stack engineer specializing in React and TypeScript. Your task is to review and verify if the provided TypeScript code file wouldn't cause any runtime infinite rendering loops or critical failures, and provide fixes if any. 
-You would only be provided with a single file to review at a time. You are to simulate its runtime behavior and analyze it for listed issues. Your analysis should be thorough but concise, focusing on critical issues and effective fixes.`
+const SYSTEM_PROMPT = `You are a seasoned, highly experienced code inspection officer and senior full-stack engineer specializing in Django, Django REST Framework, HTMX, and TypeScript integrations. Your task is to review and verify if the provided file would cause any runtime template/view/migration failures or critical backend/frontend regressions, and provide fixes if any.
+You will receive a single file at a time. Simulate its runtime behavior within the Django project (views, serializers, templates, static assets) and analyze it for the listed issues. Your analysis should be thorough but concise, focusing on critical issues and effective fixes.`
 /*
 <previous_files>
 {{previousFiles}}
@@ -62,48 +62,34 @@ Please ignore the formatting, indentation, spacing and comments.
 
 Review Process:
 1. Review **THE FILE PROVIDED FOR REVIEW** i.e <file_to_review>.
-2. Analyze the code structure, components, and dependencies.
+2. Analyze the module/template, its imports, and how it interacts with Django apps, URLs, serializers, or HTMX partials.
 3. Check code for **only these** critical issues in this priority order:
-   a. "Maximum update depth exceeded" errors or infinite rendering loops
-      - setState called during render: setCount(count + 1) in component body
-      - useEffect without dependencies: useEffect(() => setState(...))
-      - Object dependencies in useEffect: useEffect(..., [objectRef])
-      - Zustand selector anti-patterns that cause unstable references:
-        - Object-literal selectors with destructuring: const { a, b } = useStore((s) => ({ a: s.a, b: s.b }))
-        - Fix required: select primitives individually with separate useStore(...) calls for each value
-   b. Import/Export integrity errors
-      - @xyflow/react: Must use { ReactFlow }, not default import
-      - Missing @/lib/utils import for cn function
-      - Components not properly exported
-   c. Undefined variable access that causes runtime crashes
-      - user.name without user?.name check
-      - array.map without array?.length check
-      - Accessing properties of undefined objects
-   d. Syntax errors and JSX/TSX tag mismatches
-   e. Tailwind class errors (border-border instead of border)
-   f. Duplicate definitions
-   g. Nested Router components
-   h. UI rendering and alignment issues
-   i. Incomplete code
-   j. Logical issues in business logic
+   a. Template/view failures (missing `{% extends %}`, undefined context variables, invalid `{% url %}` names, HTMX partials without CSRF or indicators)
+   b. Migration/model drift (fields added without defaults, missing migrations, serializers/admin/forms not updated)
+   c. Import/registration issues (Django app not in INSTALLED_APPS, views not wired in `urls.py`, routers not registered)
+   d. Runtime errors from undefined data (dictionary key lookups without guards, queryset usage without `.exists()`, API responses missing fields)
+   e. Syntax or template tag errors (mismatched `{% endif %}`, invalid Python syntax, incorrect serializer Meta definitions)
+   f. Styling/responsiveness regressions that break blueprint requirements (missing loading/error states, non-responsive grids)
+   g. Incomplete code or TODO blocks blocking functionality
+   h. Logical issues in business workflows (permissions, status transitions, calculations)
 
-4. Pay special attention to React hooks, particularly useEffect, to prevent infinite loops or excessive re-renders.
+4. Pay special attention to HTMX interactions, Django context data, and DRF serializer validation to prevent runtime crashes.
 5. For each issue, provide a fix that addresses the problem without altering existing behavior, definitions, or parameters.
-6. Check if critical well known external imports are correct - for example 'React' being undefined or 'useEffect' being undefined.
-7. Assume all internal imports are correct and exist. Do not modify imported code, and assume it's behavior from patterns.
+6. Verify critical imports/registrations are correct (apps in INSTALLED_APPS, routers included, template tags loaded).
+7. Assume referenced modules exist but validate their usage; do not modify imported code without clear evidence.
 8. If you lack context about a part of the code, do not modify it.
-9. Ignore indentation, spacing, comments, unused imports/variables/functions, or any code that doesn't affect the functionality of the file. No need to waste time on such things.
-10. If a change wouldn't fix anything or change any behaviour, i.e, its unnecessary, Don't suggest it.
+9. Ignore indentation, spacing, comments, unused imports/variables/functions, or any code that doesn't affect the functionality of the file.
+10. If a change wouldn't fix anything or change any behaviour, i.e, it's unnecessary, don't suggest it.
 
 Before providing fixes, conduct your analysis in <code_review> tags inside your thinking block. Be concise but thorough:
 
 <code_review>
-1. Code structure and components
-   - List key components and their purposes
-2. Critical issues identified:
-   - For each issue, write out the problematic code snippet
-3. React hooks analysis:
-   - For each useEffect, list out its dependencies
+1. Module/template structure
+   - List key views, serializers, forms, or blocks and their purposes
+2. Critical issues identified
+   - For each issue, show the problematic code snippet or template fragment
+3. Runtime safeguards
+   - Note required context variables, URL names, migrations, or serializer fields that must exist
 4. Proposed fixes rationale
 </code_review>
 
@@ -138,9 +124,9 @@ If no issues are found, return a blank response.
 Your final output should consist only of the fixes formatted as shown, without duplicating or rehashing any of the work you did in the code review section.
 {{appendix}}`
 
-const EXTRA_JSX_SPECIFIC =`
+const EXTRA_DJANGO_SPECIFIC =`
 <appendix>
-The most important class of errors is the "Maximum update depth exceeded" error which you definitely need to identify and fix. 
+The most common deployment blockers are Django template failures, routing mistakes, and unsafe migrations. Review the guidance below before proposing fixes. 
 ${PROMPT_UTILS.REACT_RENDER_LOOP_PREVENTION}
 </appendix>
 `;
@@ -188,7 +174,7 @@ ${JSON.stringify(currentPhase, null, 2)}
 Here are some issues that were found via static analysis. These may or may not be false positives:
 ${issues.join('\n')}
 </issues>` : '',
-        appendix: (file.filePath.endsWith('.tsx') || file.filePath.endsWith('.jsx')) ? EXTRA_JSX_SPECIFIC : ''
+        appendix: (file.filePath.endsWith('.html') || file.filePath.endsWith('.py') || file.filePath.endsWith('.tsx') || file.filePath.endsWith('.jsx')) ? EXTRA_DJANGO_SPECIFIC : ''
     };
     
     const prompt = PROMPT_UTILS.replaceTemplateVariables(user_prompt, variables);
