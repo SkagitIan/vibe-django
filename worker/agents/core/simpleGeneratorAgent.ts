@@ -38,7 +38,7 @@ import { FastCodeFixerOperation } from '../operations/FastCodeFixer';
 import { getProtocolForHost } from '../../utils/urls';
 import { looksLikeCommand } from '../utils/common';
 import { generateBlueprint } from '../planning/blueprint';
-import { prepareCloudflareButton } from '../../utils/deployToCf';
+import { deployToDigitalOceanDroplet } from '../../utils/deployToDigitalOcean';
 import { AppService } from '../../database';
 import { RateLimitExceededError } from 'shared/types/errors';
 import { generateId } from 'worker/utils/idGenerator';
@@ -1772,106 +1772,92 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
     }
 
     /**
-     * Deploy the generated code to Cloudflare Workers
+     * Provision and configure a DigitalOcean droplet for the generated project
      */
-    async deployToCloudflare(): Promise<{ deploymentUrl?: string; workersUrl?: string } | null> {
+    async deployToDigitalOceanDroplet(): Promise<{ deploymentUrl?: string; dropletId?: string } | null> {
         try {
-            this.logger().info('Starting Cloudflare deployment');
-            this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_STARTED, {
-                message: 'Starting deployment to Cloudflare Workers...',
+            this.logger().info('Starting DigitalOcean deployment');
+            this.broadcast(WebSocketMessageResponses.DIGITALOCEAN_DEPLOYMENT_STARTED, {
+                message: 'Provisioning DigitalOcean droplet...',
                 instanceId: this.state.sandboxInstanceId,
             });
 
-            // Check if we have generated files
             if (!this.state.generatedFilesMap || Object.keys(this.state.generatedFilesMap).length === 0) {
                 this.logger().error('No generated files available for deployment');
-                this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_ERROR, {
+                this.broadcast(WebSocketMessageResponses.DIGITALOCEAN_DEPLOYMENT_ERROR, {
                     message: 'Deployment failed: No generated code available',
-                    error: 'No files have been generated yet'
+                    error: 'No files have been generated yet',
                 });
                 return null;
             }
 
-            // Check if we have a sandbox instance ID
-            if (!this.state.sandboxInstanceId) {
-                this.logger().info('[DeployToCloudflare] No sandbox instance ID available, will initiate deployment');
-                // Need to redeploy
-                await this.deployToSandbox();
-
-                if (!this.state.sandboxInstanceId) {
-                    this.logger().error('[DeployToCloudflare] Failed to deploy to sandbox service');
-                    this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_ERROR, {
-                        message: 'Deployment failed: Failed to deploy to sandbox service',
-                        error: 'Sandbox service unavailable'
-                    });
-                    return null;
-                }
+            const token = this.env.DIGITALOCEAN_API_TOKEN;
+            if (!token) {
+                this.logger().error('DigitalOcean API token not configured');
+                this.broadcast(WebSocketMessageResponses.DIGITALOCEAN_DEPLOYMENT_ERROR, {
+                    message: 'Deployment failed: DigitalOcean API token missing',
+                    error: 'DIGITALOCEAN_API_TOKEN not configured',
+                });
+                return null;
             }
 
-            this.logger().info('[DeployToCloudflare] Prerequisites met, initiating deployment', {
-                sandboxInstanceId: this.state.sandboxInstanceId,
-                fileCount: Object.keys(this.state.generatedFilesMap).length
+            const projectName = this.state.blueprint?.projectName || 'vibe-app';
+            const slug = projectName
+                .toLowerCase()
+                .replace(/[^a-z0-9-]/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '')
+                .slice(0, 30) || 'vibe-app';
+
+            const summary = this.state.blueprint?.projectSummary;
+
+            const regionValue = this.env.DIGITALOCEAN_REGION;
+            const region = regionValue && regionValue.trim().length > 0 ? regionValue.trim() : undefined;
+
+            const droplet = await deployToDigitalOceanDroplet({
+                token,
+                name: slug,
+                region,
+                summary,
             });
 
-            const deploymentResult = await this.getSandboxServiceClient().deployToCloudflareWorkers(this.state.sandboxInstanceId);
-            this.logger().info('[DeployToCloudflare] Deployment result:', deploymentResult);
-            if (!deploymentResult) {
-                this.logger().error('[DeployToCloudflare] Deployment API call failed');
-                this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_ERROR, {
-                    message: 'Deployment failed: API call returned null',
-                    error: 'Deployment service unavailable'
-                });
-                return null;
-            }
+            const deploymentUrl = droplet.ipv4Address ? `http://${droplet.ipv4Address}` : undefined;
+            const sshCommand = droplet.ipv4Address ? `ssh root@${droplet.ipv4Address}` : undefined;
 
-            if (!deploymentResult.success) {
-                this.logger().error('Deployment failed', {
-                    message: deploymentResult.message,
-                    error: deploymentResult.error
-                });
-                this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_ERROR, {
-                    message: `Deployment failed: ${deploymentResult.message}`,
-                    error: deploymentResult.error || 'Unknown deployment error'
-                });
-                return null;
-            }
-
-            const deploymentUrl = deploymentResult.deployedUrl;
-
-            this.logger().info('[DeployToCloudflare] Cloudflare deployment completed successfully', {
-                deploymentUrl,
-                deploymentId: deploymentResult.deploymentId,
-                sandboxInstanceId: this.state.sandboxInstanceId,
-                message: deploymentResult.message
+            this.setState({
+                ...this.state,
+                latestDeployment: {
+                    provider: 'digitalocean',
+                    dropletId: droplet.dropletId.toString(),
+                    ipAddress: droplet.ipv4Address,
+                    url: deploymentUrl,
+                    sshCommand,
+                    consoleUrl: droplet.consoleUrl,
+                },
             });
 
             const appService = new AppService(this.env);
-            // Update cloudflare URL in database
             await appService.updateDeploymentId(
                 this.getAgentId(),
-                deploymentResult.deploymentId || ''
+                droplet.dropletId.toString(),
             );
 
-            // Broadcast success message
-            this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_COMPLETED, {
-                message: deploymentResult.message || 'Successfully deployed to Cloudflare Workers!',
-                deploymentUrl
+            this.broadcast(WebSocketMessageResponses.DIGITALOCEAN_DEPLOYMENT_COMPLETED, {
+                message: 'Successfully provisioned DigitalOcean droplet!',
+                deploymentUrl,
+                dropletId: droplet.dropletId,
+                ipAddress: droplet.ipv4Address,
+                consoleUrl: droplet.consoleUrl,
+                sshCommand,
             });
 
-            return { deploymentUrl };
-
+            return { deploymentUrl, dropletId: droplet.dropletId.toString() };
         } catch (error) {
-            // return ErrorHandler.handleOperationError(
-            //     this.logger(),
-            //     this,
-            //     'Cloudflare deployment',
-            //     error,
-            //     WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_ERROR
-            // );
-            this.logger().error('Cloudflare deployment failed', error);
-            this.broadcast(WebSocketMessageResponses.CLOUDFLARE_DEPLOYMENT_ERROR, {
-                message: `Deployment failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                error: error instanceof Error ? error.message : 'Unknown error'
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            this.logger().error('DigitalOcean deployment failed', error);
+            this.broadcast(WebSocketMessageResponses.DIGITALOCEAN_DEPLOYMENT_ERROR, {
+                message: `Deployment failed: ${message}`,
+                error: message,
             });
             return null;
         }
@@ -2235,24 +2221,6 @@ export class SimpleCodeGeneratorAgent extends Agent<Env, CodeGenState> {
             }
 
             this.logger().info('GitHub export completed successfully', { options, commitSha: exportResult.commitSha });
-
-            // Commit the readme
-            // First prepare the readme by replacing [cloudflarebutton] placeholder with actual thing
-            const readmeFile = this.fileManager.getFile('README.md');
-            if (readmeFile) {
-                try {
-                    readmeFile.fileContents = readmeFile.fileContents.replaceAll('[cloudflarebutton]', prepareCloudflareButton(options.repositoryHtmlUrl, 'markdown'));
-                    this.fileManager.saveGeneratedFile(readmeFile);
-                    await this.deployToSandbox([readmeFile], false, "feat: README updated with cloudflare deploy button");
-                    // Export again
-                    await this.getSandboxServiceClient().pushToGitHub(this.state.sandboxInstanceId!, options);
-                    this.logger().info('Readme committed successfully');
-                } catch (error) {
-                    this.logger().error('Failed to commit readme', error);
-                }
-            } else {
-                this.logger().info('Readme not found, skipping commit');
-            }
 
             // Step 3: Finalize
             this.broadcast(WebSocketMessageResponses.GITHUB_EXPORT_PROGRESS, {
