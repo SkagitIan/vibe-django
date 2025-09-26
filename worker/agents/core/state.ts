@@ -57,4 +57,12 @@ export interface CodeGenState {
     
     conversationMessages: ConversationMessage[];
     inferenceContext: InferenceContext;
-}  
+    latestDeployment?: {
+        provider: 'digitalocean';
+        dropletId: string;
+        ipAddress?: string;
+        url?: string;
+        sshCommand?: string;
+        consoleUrl?: string;
+    };
+}

@@ -25,10 +25,10 @@ export const WebSocketMessageResponses: Record<string, WebSocketMessageType> = {
     DEPLOYMENT_STARTED: 'deployment_started',
     DEPLOYMENT_COMPLETED: 'deployment_completed',
     DEPLOYMENT_FAILED: 'deployment_failed',
-    // Cloudflare deployment messages
-    CLOUDFLARE_DEPLOYMENT_STARTED: 'cloudflare_deployment_started',
-    CLOUDFLARE_DEPLOYMENT_COMPLETED: 'cloudflare_deployment_completed', 
-    CLOUDFLARE_DEPLOYMENT_ERROR: 'cloudflare_deployment_error',
+    // DigitalOcean deployment messages
+    DIGITALOCEAN_DEPLOYMENT_STARTED: 'digitalocean_deployment_started',
+    DIGITALOCEAN_DEPLOYMENT_COMPLETED: 'digitalocean_deployment_completed',
+    DIGITALOCEAN_DEPLOYMENT_ERROR: 'digitalocean_deployment_error',
     
     // Screenshot messages
     SCREENSHOT_CAPTURE_STARTED: 'screenshot_capture_started',
