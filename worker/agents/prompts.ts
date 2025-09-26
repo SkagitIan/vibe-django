@@ -149,434 +149,196 @@ ${typecheckOutput}`;
     },
 
     REACT_RENDER_LOOP_PREVENTION: `<REACT_RENDER_LOOP_PREVENTION>
-In React, "Maximum update depth exceeded" means something in your component tree is setting state in a way that immediately triggers another render, which sets state again… and you've created a render→setState→render loop. React aborts after ~50 nested updates and throws this error.
+Django crashes most often when templates, URLs, or database migrations fall out of sync. Treat this section as your playbook for keeping preview servers stable and developer feedback fast.
 
-## The 3 Root Causes of Infinite Loops
+## The 3 Most Common Django Runtime Failures
 
-### 1. **Direct State Updates During Render (MOST COMMON)**
-Never call a state setter directly within the rendering logic of your component. All state updates must happen in event handlers, useEffect hooks, or async callbacks.
+### 1. **Missing Templates or Context Keys (MOST COMMON)**
+Never reference a block, partial, or context variable that is not guaranteed to exist. Always inherit from a base layout and include fallbacks.
 
 **Basic Pattern:**
-\`\`\`tsx
-// BAD CODE ❌ State update during render
-function Bad() {
-    const [n, setN] = useState(0);
-    setN(n + 1); // Runs on every render -> infinite loop
-    return <div>{n}</div>;
-}
+```django
+{# BAD CODE ❌ direct include without existence check #}
+{% include "dashboard/widgets/stats-card.html" %}
 
-// GOOD CODE ✅ State update in event handler
-function Good() {
-    const [n, setN] = useState(0);
-    const handleClick = () => setN(n + 1); // Safe: only runs on user interaction
-    return <button onClick={handleClick}>{n}</button>;
-}
-\`\`\`
+{# GOOD CODE ✅ centralised partial with defaults #}
+{% include "dashboard/widgets/stats-card.html" with stats=stats|default:empty_stats %}
+```
 
-**Conditional Updates During Render:**
-\`\`\`tsx
-// BAD CODE ❌ Conditional state update in render
-function Component({ showModal }) {
-    const [modalOpen, setModalOpen] = useState(false);
-    if (showModal && !modalOpen) {
-        setModalOpen(true); // setState during render
+**Context Guarding:**
+```python
+# BAD CODE ❌ missing key leads to TemplateDoesNotExist or KeyError
+def dashboard(request):
+    return render(request, "dashboard/index.html", {})
+
+# GOOD CODE ✅ provide explicit context defaults
+def dashboard(request):
+    context = {
+        "stats": get_stats() or [],
+        "filters": FilterForm(request.GET or None),
     }
-    return modalOpen ? <Modal /> : null;
-}
+    return render(request, "dashboard/index.html", context)
+```
 
-// GOOD CODE ✅ Use useEffect for state synchronization
-function Component({ showModal }) {
-    const [modalOpen, setModalOpen] = useState(false);
-    useEffect(() => {
-        setModalOpen(showModal);
-    }, [showModal]);
-    return modalOpen ? <Modal /> : null;
-}
-\`\`\`
+**Base Layouts & Blocks:**
+```django
+{# BAD CODE ❌ duplicating nav/footer in every template #}
+<html>... repeated nav ...</html>
 
-**Side Effects in Memoization:**
-\`\`\`tsx
-// BAD CODE ❌ State update inside useMemo/useCallback
-function Component({ data }) {
-    const [processed, setProcessed] = useState(null);
-    const memoizedValue = useMemo(() => {
-        setProcessed(data.map(transform)); // Side effect in memoization
-        return computedValue;
-    }, [data]);
-    return <div>{memoizedValue}</div>;
-}
+{# GOOD CODE ✅ template inheritance keeps layout consistent #}
+{% extends "core/layouts/base.html" %}
+{% block content %}...{% endblock %}
+```
 
-// GOOD CODE ✅ Separate side effects from memoization
-function Component({ data }) {
-    const [processed, setProcessed] = useState(null);
-    const memoizedValue = useMemo(() => computedValue, [data]);
-    
-    useEffect(() => {
-        setProcessed(data.map(transform));
-    }, [data]);
-    
-    return <div>{memoizedValue}</div>;
-}
-\`\`\`
+### 2. **URL / View Import Errors**
+Always keep `urls.py` wiring in sync with view definitions and namespaces.
 
-### 2. **Effects Triggering Themselves Unconditionally**
-An effect that sets state must have logic to prevent it from running again after that state is set.
+```python
+# BAD CODE ❌ missing import or wrong name
+path("reports/", reports, name="reports")
 
-**Missing Dependency Array:**
-\`\`\`tsx
-// BAD CODE ❌ Effect runs after every render
-function BadCounter() {
-    const [count, setCount] = useState(0);
-    useEffect(() => {
-        setCount(prevCount => prevCount + 1);
-    }); // No dependency array -> infinite loop
-    return <div>{count}</div>;
-}
+# GOOD CODE ✅ explicit import + namespacing
+from apps.reports.views import ReportListView
+app_name = "reports"
+urlpatterns = [
+    path("", ReportListView.as_view(), name="list"),
+]
+```
 
-// GOOD CODE ✅ Dependency array prevents infinite loop
-function GoodCounter() {
-    const [count, setCount] = useState(0);
-    useEffect(() => {
-        setCount(1); // Only run once on mount
-    }, []); // Empty array = run once on mount
-    return <div>{count}</div>;
-}
-\`\`\`
+### 3. **Migration & Serializer Drift**
+Model changes require migrations, serializer updates, and admin registration in the same commit or phase.
 
-**Conditional Effect Logic:**
-\`\`\`tsx
-// GOOD CODE ✅ Effect with conditional logic
-function UserData({ userId }) {
-    const [user, setUser] = useState(null);
-    useEffect(() => {
-        if (userId) { // Conditional logic prevents unnecessary runs
-            fetchUser(userId).then(data => setUser(data));
-        }
-    }, [userId]); // Only runs when userId changes
-    return <div>{user ? user.name : 'Loading...'}</div>;
-}
-\`\`\`
+```python
+# BAD CODE ❌ adding field without defaults
+class Project(models.Model):
+    title = models.CharField(max_length=255)
+    status = models.CharField(max_length=20)  # NEW FIELD but no default
 
-### 3. **Unstable Dependencies (Referential Inequality)**
-When a dependency for useEffect, useMemo, or useCallback is a non-primitive (object, array, function) that is re-created on every render.
+# GOOD CODE ✅ safe defaults + serializer alignment
+class Project(models.Model):
+    title = models.CharField(max_length=255)
+    status = models.CharField(max_length=20, choices=ProjectStatus.choices, default=ProjectStatus.PLANNING)
 
-**Objects in useEffect:**
-\`\`\`tsx
-// BAD CODE ❌ Object dependency is recreated every render
-function Component() {
-    const [v, setV] = useState(0);
-    const filters = { type: 'active', status: 'pending' }; // New object every render
-    useEffect(() => {
-        setV(prev => prev + 1);
-    }, [filters]); // Triggers every render due to new object reference
-    return <div>{v}</div>;
-}
+class ProjectSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Project
+        fields = ("id", "title", "status", "updated_at")
+```
 
-// GOOD CODE ✅ Stabilize object with useMemo
-function Component() {
-    const [v, setV] = useState(0);
-    const filters = useMemo(() => ({ type: 'active', status: 'pending' }), []);
-    useEffect(() => {
-        setV(prev => prev + 1);
-    }, [filters]); // Only triggers when filters actually change
-    return <div>{v}</div>;
-}
-\`\`\`
+**Migration Checklist:**
+- Generate migrations whenever models change (`python manage.py makemigrations`).
+- Ensure migrations are idempotent and reversible.
+- Run `python manage.py migrate` locally before marking the phase complete.
 
-**Context Value Recreation:**
-\`\`\`tsx
-// BAD CODE ❌ Context value recreated every render
-function App() {
-    const [user, setUser] = useState(null);
-    const value = { user, setUser }; // New object every render
-    return <UserContext.Provider value={value}>...</UserContext.Provider>;
-}
+**Serializer/Admin Sync:**
+- Update DRF serializers, admin, and forms to include new fields.
+- Provide default values to avoid `IntegrityError` during migration.
 
-// GOOD CODE ✅ Memoize context value
-function App() {
-    const [user, setUser] = useState(null);
-    const value = useMemo(() => ({ user, setUser }), [user]);
-    return <UserContext.Provider value={value}>...</UserContext.Provider>;
-}
-\`\`\`
+## HTMX Safety Essentials
+- Add `{% csrf_token %}` to every form or HTMX request.
+- Provide `<div hx-indicator>` spinners and `hx-on::error` handlers that show user-friendly error banners.
+- Scope updates with `hx-target` so partials do not clobber entire pages.
 
-**State Management Library Selectors:**
-Never use object literals to select multiple values from a store. Always select individual values.
-\`\`\`tsx
-// BAD CODE ❌ Multiple values in selector: Selector returns new object every render
-const { score, bestScore } = useGameStore((state) => ({
-    score: state.score,
-    bestScore: state.bestScore,
-})); // Creates new object reference every time
-
-// GOOD CODE ✅ Select primitive values individually
-const score = useGameStore((state) => state.score);
-const bestScore = useGameStore((state) => state.bestScore);
-\`\`\`
-
-**STRICT POLICY:** Do NOT destructure multiple values from an object-literal selector. Always call useStore multiple times for primitives.
-\`\`\`tsx
-// BAD CODE ❌ Object-literal selector with destructuring (causes unstable references)
-const { servers, selectedServerId, selectedChannelId, selectChannel } = useAppStore((state) => ({
-  servers: state.servers,
-  selectedServerId: state.selectedServerId,
-  selectedChannelId: state.selectedChannelId,
-  selectChannel: state.selectChannel,
-}));
-
-// GOOD CODE ✅ Select slices individually to keep snapshots stable
-const servers = useAppStore((state) => state.servers);
-const selectedServerId = useAppStore((state) => state.selectedServerId);
-const selectedChannelId = useAppStore((state) => state.selectedChannelId);
-const selectChannel = useAppStore((state) => state.selectChannel);
-\`\`\`
-
-## Other Common Loop-Inducing Patterns
-
-**Parent/Child Feedback Loops:**
-- Child effect updates parent state → parent rerenders → child gets new props → child effect runs again
-- **Solution:** Lift state up or use callbacks that are idempotent/guarded
-
-**State within Recursive Components:**
-\`\`\`tsx
-// BAD CODE ❌ Each recursive call creates independent state
-function FolderTree({ folders }) {
-    const [expanded, setExpanded] = useState(new Set());
-    return (
-        <div>
-            {folders.map(f => (
-                <FolderTree key={f.id} folders={f.children} />
-            ))}
-        </div>
-    );
-}
-
-// GOOD CODE ✅ Lift state up to non-recursive parent
-function FolderTree({ folders, expanded, onToggle }) {
-    return (
-        <div>
-            {folders.map(f => (
-                <FolderTree key={f.id} folders={f.children} expanded={expanded} onToggle={onToggle} />
-            ))}
-        </div>
-    );
-}
-
-function Sidebar() {
-    const [expanded, setExpanded] = useState(new Set());
-    const handleToggle = (id) => { /* logic */ };
-    return <FolderTree folders={allFolders} expanded={expanded} onToggle={handleToggle} />;
-}
-\`\`\`
-
-**Stale Closures (Correctness Issue):**
-While not directly causing infinite loops, stale closures cause incorrect state transitions:
-\`\`\`tsx
-// BAD CODE ❌ Stale closure in event handler
-function Counter() {
-    const [count, setCount] = useState(0);
-    const handleClick = () => {
-        setCount(count + 1); // Uses stale count value
-        setCount(count + 1); // Won't increment by 2
-    };
-    return <button onClick={handleClick}>{count}</button>;
-}
-
-// GOOD CODE ✅ Functional updates avoid stale closures
-function Counter() {
-    const [count, setCount] = useState(0);
-    const handleClick = useCallback(() => {
-        setCount(prev => prev + 1);
-        setCount(prev => prev + 1); // Will correctly increment by 2
-    }, []);
-    return <button onClick={handleClick}>{count}</button>;
-}
-\`\`\`
-
-## Quick Prevention Checklist: The Golden Rules
-
-✅ **Move state updates out of render body** - Only update state in useEffect hooks or event handlers  
-✅ **Provide dependency arrays to every useEffect** - Missing dependencies cause infinite loops  
-✅ **Make effect logic conditional** - Add guards like \`if (data.length > 0)\` to prevent re-triggering  
-✅ **Stabilize non-primitive dependencies** - Use useMemo and useCallback for objects/arrays/functions  
-✅ **Select primitives from stores** - \`useStore(s => s.score)\` not \`useStore(s => ({ score: s.score }))\`  
-✅ **Lift state up from recursive components** - Never initialize state inside recursive calls  
-✅ **Use functional updates** - \`setState(prev => prev + 1)\` avoids stale closures  
-✅ **Prefer refs for non-UI data** - \`useRef\` doesn't trigger re-renders when updated  
-✅ **Avoid prop→state mirrors** - Derive values directly or use proper synchronization  
-✅ **Break parent↔child feedback loops** - Lift state or use idempotent callbacks
-
-\`\`\`tsx
-// GOLDEN RULE EXAMPLES ✅
-
-// 1. State updates in event handlers only
-const handleClick = () => setState(newValue);
-
-// 2. Effects with dependency arrays
-useEffect(() => { /* logic */ }, [dependency]);
-
-// 3. Conditional effect logic
-useEffect(() => {
-  if (userId) { fetchUser(userId).then(setUser); }
-}, [userId]);
-
-// 4. Stabilized objects/arrays
-const config = useMemo(() => ({ a, b }), [a, b]);
-const handleClick = useCallback(() => {}, [dep]);
-
-// 5. Primitive selectors
-const score = useStore(state => state.score);
-const name = useStore(state => state.user.name);
-
-// 6. Functional updates
-setCount(prev => prev + 1);
-setItems(prev => [...prev, newItem]);
-
-// 7. Refs for non-UI data
-const latestValue = useRef();
-latestValue.current = currentValue; // No re-render
-
-// 8. Derive instead of mirror
-const derivedValue = propValue.toUpperCase(); // No state needed
-\`\`\`
+## Preview Diagnostics
+- Wrap risky template regions with `{% if debug %}` overlays to surface stack traces in preview mode.
+- Log server errors with structured context (view name, params) to speed up debugging.
+- Document commands (`npm run dev`, `python manage.py runserver`, etc.) so preview containers can auto-restart.
 </REACT_RENDER_LOOP_PREVENTION>`,
 
 COMMON_PITFALLS: `<AVOID COMMON PITFALLS>
     **TOP 6 MISSION-CRITICAL RULES (FAILURE WILL CRASH THE APP):**
-    1. **DEPENDENCY VALIDATION:** BEFORE writing any import statement, verify it exists in <DEPENDENCIES>. Common failures: @xyflow/react uses { ReactFlow } not default import, @/lib/utils for cn function. If unsure, check the dependency list first.
-    2. **IMPORT & EXPORT INTEGRITY:** Ensure every component, function, or variable is correctly defined and imported properly (and exported properly). Mismatched default/named imports will cause crashes.
-    3. **NO RUNTIME ERRORS:** Write robust, fault-tolerant code. Handle all edge cases gracefully with fallbacks. Never throw uncaught errors that can crash the application.
-    4. **NO UNDEFINED VALUES/PROPERTIES/FUNCTIONS/COMPONENTS etc:** Ensure all variables, functions, and components are defined before use. Never use undefined values. If you use something that isn't already defined, you need to define it.
-    5. **STATE UPDATE INTEGRITY:** Never call state setters directly during the render phase; all state updates must originate from event handlers or useEffect hooks to prevent infinite loops.
-    6. **STATE SELECTOR STABILITY:** When using state management libraries (Zustand, Redux), always select primitive values individually. Never return a new object or array from a single selector, as this creates unstable references and will cause infinite render loops.
-    
+    1. **DEPENDENCY VALIDATION:** BEFORE writing any import statement, verify the package or module exists in <DEPENDENCIES> or the Django app registry. Install checks fail fast; avoid speculative imports.
+    2. **URL & VIEW INTEGRITY:** Ensure every route declared in `urls.py` maps to a real view or DRF viewset. Namespaces (`app_name`) are required for multi-app projects.
+    3. **MIGRATION HYGIENE:** Whenever models change, generate migrations, review them for safety, and apply them. Missing defaults or nullable fields will break deploys.
+    4. **TEMPLATE SAFETY:** Never reference context variables that may be undefined. Use `{% include %}` with explicit context and always inherit from a base template to avoid duplicate layout code.
+    5. **API CONTRACT GUARANTEE:** Keep serializers, viewsets, and schema definitions in sync. Return structured errors (detail, code) so HTMX/React clients can display friendly messages.
+    6. **STATIC & BUNDLER CONSISTENCY:** Serve assets through `{% static %}` or manifest helpers. Do not hardcode hashed filenames; update bundler manifests when assets change.
+
     **UI/UX EXCELLENCE CRITICAL RULES:**
-    7. **VISUAL HIERARCHY CLARITY:** Every interface must have clear visual hierarchy - never create pages with uniform text sizes or equal visual weight for all elements
-    8. **INTERACTIVE FEEDBACK MANDATORY:** Every button, link, and interactive element MUST have visible hover, focus, and active states - no exceptions
-    9. **RESPONSIVE BREAKPOINT INTEGRITY:** Test layouts mentally at sm, md, lg breakpoints - never create layouts that break or look unintentional at any screen size
-    10. **SPACING CONSISTENCY:** Use systematic spacing (space-y-4, space-y-6, space-y-8) - avoid arbitrary margins that create visual chaos
-    11. **LOADING STATE EXCELLENCE:** Every async operation must have beautiful loading states - never leave users staring at blank screens
-    12. **ERROR HANDLING GRACE:** All error states must be user-friendly with clear next steps - never show raw error messages or technical jargon
+    7. **VISUAL HIERARCHY CLARITY:** Every template must express a clear hierarchy using headings, spacing, and typography.
+    8. **INTERACTIVE FEEDBACK MANDATORY:** All forms and HTMX triggers must expose loading indicators, disabled states, and success/error banners.
+    9. **RESPONSIVE BREAKPOINT INTEGRITY:** Design mobile-first, then enhance for tablet/desktop. Ensure grids/partials collapse gracefully.
+    10. **SPACING CONSISTENCY:** Use design tokens or Tailwind spacing scale; avoid arbitrary pixel values that break rhythm.
+    11. **LOADING STATE EXCELLENCE:** Provide skeletons/spinners for async DRF calls and HTMX swaps; never leave blank sections.
+    12. **ERROR HANDLING GRACE:** Present user-friendly error summaries with remediation steps, not raw tracebacks (except in preview overlays).
 
     **ENHANCED RELIABILITY PATTERNS:**
-    •   **State Management:** Handle loading/success/error states for async operations. Initialize state with proper defaults, never undefined. Use functional updates for dependent state.
-    •   **Type Safety:** Define interfaces for props/state/API responses. Check null/undefined before property access. Validate array length before element access. Rely on \`?\` operator for properties that might be undefined.
-    •   **Component Safety:** Use error boundaries for components that might fail. Provide fallbacks for conditional content. Use stable, unique keys for lists.
-    •   **Performance:** Use React.memo, useMemo, useCallback to prevent unnecessary re-renders. Define event handlers outside render or use useCallback.
-    •   **Object Literals**: NEVER duplicate property names. \`{name: "A", age: 25, name: "B"}\` = compilation error
-    •   **Always follow best coding practices**: Follow best coding practices and principles:
-        - Always maximize code reuse and minimize code redundancy and duplicacy. 
-        - Strict DRY (Don't Repeat Yourself) principle.
-        - Always try to import or extend existing types, components, functions, variables, etc. instead of redefining something similar.
+    •   **Data Access:** Wrap ORM operations in transactions when performing multi-step writes. Handle DoesNotExist exceptions gracefully.
+    •   **Type Safety:** Define Pydantic/TypedDict/Serializer classes for API responses. Validate external input before use.
+    •   **Template Safety:** Use `{% empty %}` blocks, `default` filters, and guard loops with `{% if items %}` to avoid crashy pages.
+    •   **Performance:** Prefetch related data, paginate large querysets, and cache expensive fragments cautiously.
+    •   **Object Literals:** When returning JSON, ensure keys are unique and snake_case; avoid duplicate keys that clobber data.
+    •   **Best Practices:** Reuse partials (`{% include %}`), view mixins, and serializer base classes to reduce duplication.
 
-    •   **When using Zustand with Zustand's immer middleware, never define computed getters on the store. Export typed selectors/hooks that derive from primitive IDs.**
-    •   **Use useStore(selector) with functions that depend on raw state fields (e.g., IDs), not on derived getters.**
-    •   **Keep actions responsible for side-effects (fetch/poll), and selectors responsible for derivation only.**
-    •   **STRICT Zustand Selector Policy (ZERO TOLERANCE):** Do NOT return objects/arrays from \`useStore\` selectors nor destructure multiple values from an object-literal selector. Always select primitives individually. If you need multiple values, call \`useStore\` multiple times.
-    •   If you absolutely must read multiple values in one call, pass zustand's shallow comparator: \`useStore(selector, shallow)\`. Avoid object literals and avoid \`useStore(s => s)\`.
+    **STATE & SESSION CONSIDERATIONS:**
+    •   Use Django sessions sparingly; prefer explicit state persisted in the database or signed cookies.
+    •   HTMX requests should return partials with deterministic DOM IDs to keep swapping predictable.
 
     **ALGORITHMIC PRECISION & LOGICAL REASONING:**
-    •   **Mathematical Accuracy:** For games/calculations, implement precise algorithms step-by-step. ALWAYS validate boundaries: if (x >= 0 && x < width && y >= 0 && y < height). Use === for exact comparisons.
-    •   **Game Logic Systems:** Break complex logic into smaller, testable functions. Example: moveLeft(), checkWin(), updateScore(). Each function should handle ONE responsibility.
-    •   **Array/Grid Operations:** CRITICAL - Check array bounds before access: if (grid[row] && grid[row][col] !== undefined). Use descriptive names: rowIndex, colIndex, not i, j.
-    •   **State Transitions:** For complex state changes, use pure functions that return new state. Example: const newState = {...oldState, score: oldState.score + points}.
-    •   **Algorithm Test Cases:** BEFORE coding, write a simple test case. Example: "moveLeft([2,2,4,0]) should return [4,4,0,0]". Verify your logic matches this expected output.
+    •   Validate business rules in forms/serializers. Test edge cases (empty lists, invalid filters, timezone differences).
+    •   Use descriptive variable names for loops (`row_index`, `column_index`) when rendering tables/calendars.
 
     **FRAMEWORK & SYNTAX SPECIFICS:**
-    •   Framework compatibility: Pay attention to version differences (Tailwind v3 vs v4, React Router versions)
-    •   No environment variables: App deploys serverless - avoid libraries requiring env vars unless they support defaults
-    •   Next.js best practices: Follow latest patterns to prevent dev server rendering issues
-    •   Tailwind classes: Verify all classes exist in tailwind.config.js (e.g., avoid undefined classes like \`border-border\`)
-    •   Component exports: Export all components properly, avoid mixing default/named imports
-    •   UI spacing: Ensure proper padding/margins, avoid left-aligned layouts without proper spacing
+    •   Respect Django settings (STATIC_URL, INSTALLED_APPS). Register new apps before referencing them.
+    •   Keep management commands idempotent and guard against duplicate seed data.
+    •   When bundling assets with Vite/Webpack, output a manifest JSON and load entries via a helper tag.
+    •   Ensure Tailwind/PostCSS builds run in CI and include generated CSS in static files.
 
-    **PROPER IMPORTS**:
-       - **Importing React and other libraries should be done correctly.**
+    **PROPER IMPORTS & MODULE STRUCTURE:**
+       - Import views, serializers, and forms via explicit paths (`from apps.billing.views import InvoiceView`).
+       - Keep `__init__.py` exports minimal; avoid circular imports by referencing modules directly.
 
     **CRITICAL SYNTAX ERRORS - PREVENT AT ALL COSTS:**
-    1. **IMPORT SYNTAX**: Always use correct import syntax. NEVER write \`import */styles/globals.css'\` - use \`import './styles/globals.css'\`
-    2. **UNDEFINED VARIABLES**: Always import/define variables before use. \`cn is not defined\` = missing \`import { cn } from './lib/utils'\`
+    1. **IMPORT SYNTAX:** Always use absolute app imports (`from apps.core import models`). Avoid relative imports that break when files move.
+    2. **UNDEFINED VARIABLES:** Ensure context keys, serializer fields, and template tags exist before referencing them.
 
     **CRITICAL ERROR RECOVERY PATTERNS:**
-    •   **API Call Safety:** Always wrap in try-catch with user-friendly fallbacks:
-        \`const [data, setData] = useState(null); const [loading, setLoading] = useState(true); const [error, setError] = useState(null);\`
-    •   **Component Rendering Safety:** Use conditional rendering to prevent crashes:
-        \`{user ? <Profile user={user} /> : <div>Loading user...</div>}\`
-    •   **Array Operations Safety:** Always check if array exists:
-        \`{items?.length > 0 ? items.map(...) : <div>No items found</div>}\`
-    •   **State Update Safety:** Use functional updates when depending on previous state:
-        \`setCount(prev => prev + 1)\` instead of \`setCount(count + 1)\`
+    •   **API Call Safety:** Wrap external calls in try/except, return `Response({...}, status=...)` with helpful messages.
+    •   **Template Rendering Safety:** Provide `{% else %}` fallbacks for loops and conditionals so the UI never disappears.
+    •   **Form Handling Safety:** Validate forms with `form.is_valid()` before saving; return errors inline with helpful copy.
 
     **PRE-CODE VALIDATION CHECKLIST:**
     Before writing any code, mentally verify:
-    - All imports use correct syntax and paths. Be cautious about named vs default imports wherever needed.
-    - All variables are defined before use  
-    - No setState calls during render phase
-    - No object-literal selectors in Zustand (avoid \`useStore((state) => ({ ... }))\`; select primitives individually)
-    - All Tailwind classes exist in config
-    - External dependencies are available
-    - Error boundaries around components that might fail
+    - URLs/routes exist and map to the correct views
+    - Migrations are generated/applied for model changes
+    - Templates extend base layouts and include required blocks
+    - Serializers/forms cover every field used in templates
+    - Static assets referenced via `{% static %}` or manifest helper
+    - External dependencies are available and configured
 
-    **Also there is no support for websockets and dynamic imports may not work, so please avoid using them.**
+    **Also note there is no support for websockets and dynamic imports may not work, so please avoid using them.**
 
     ### **IMPORT VALIDATION EXAMPLES**
-    **CRITICAL**: Verify ALL imports before using. Wrong imports = runtime crashes.
-
     **BAD IMPORTS** (cause runtime errors):
-    \`\`\`tsx
-    import ReactFlow from '@xyflow/react';      // WRONG: ReactFlow is named export
-    import cn from '@/lib/utils';               // WRONG: cn is named export  
-    import { Button } from 'shadcn/ui';         // WRONG: should be @/components/ui
-    import { useState } from 'react';           // MISSING: React itself
-    import { useRouter } from 'next/navigation'; // WRONG: use 'react-router-dom'
-    \`\`\`
+    ```python
+    from .views import *                 # WRONG: pollutes namespace and hides missing views
+    from django.urls import path, include # WRONG if include is unused; lint errors hide real issues
+    from .models import Project           # WRONG if models live in another app
+    ```
 
     **GOOD IMPORTS** (correct syntax):
-    \`\`\`tsx
-    import React, { useState, useEffect } from 'react';  // ALWAYS import React
-    import { ReactFlow } from '@xyflow/react';           // CORRECT: named export
-    import { cn } from '@/lib/utils';                    // CORRECT: named export
-    import { Button } from '@/components/ui/button';     // CORRECT: full path
-    import { useNavigate } from 'react-router-dom';      // CORRECT for routing
-    \`\`\`
+    ```python
+    from apps.projects.views import ProjectDashboardView
+    from apps.projects.api import ProjectViewSet
+    from django.urls import path
+    ```
 
     **Import Checklist**:
-    - ✅ React imported in every TSX/JSX file
-    - ✅ All @xyflow imports use named exports: { ReactFlow, Node, Edge }
-    - ✅ All UI components use full @/components/ui/[component] path
-    - ✅ cn function from '@/lib/utils' (named export)
-    - ✅ Router hooks from 'react-router-dom' (not Next.js)
+    - ✅ Every Django app added to INSTALLED_APPS before use
+    - ✅ URLs use namespaced patterns (`app_name = "projects"`)
+    - ✅ Serializers/forms imported from explicit modules, not `*`
 
-    **A \`require()\` or \`import()\` style import is forbidden. Always import properly at the top of the file.**
-    # Few more heuristics:
-        **IF** you receive a TypeScript error "cannot be used as a JSX component" for a component \`<MyComponent />\`, **AND** the error says its type is \`'typeof import(...)'\`, then check if the import is correct (named vs default import).
-        Applying this rule to your situation will fix both the type-check errors and the browser's runtime error.
-
-    # Never write image files! Never write jpeg, png, svg, etc files yourself! Always use some image url from the web.
-
-</AVOID COMMON PITFALLS>`,
-    STYLE_GUIDE: `<STYLE_GUIDE>
-    • Use 2 spaces for indentation
-    • Use single quotes for strings
-    • Use double quotes for JSX attributes
-    • Use semicolons for statements
-    • **Always use named exports and imports**
-</STYLE_GUIDE>
+    **Never write image files! Never write jpeg, png, svg, etc files yourself! Always use some image url from the web.**
+</AVOID COMMON PITFALLS>`
 `,
     COMMON_DEP_DOCUMENTATION: `<COMMON DEPENDENCY DOCUMENTATION>
-    • **The @xyflow/react package doesn't export a default ReactFlow, it exports named imports.**
-        - Don't import like this:
-        \`import ReactFlow from '@xyflow/react';\`
-        Doing this would cause a runtime error and the only hint you would get is a lint message: 'ReactFlow' cannot be used as a JSX component. Its type 'typeof import(...)' is not a valid JSX element type
-
-        - Import like this:
-        \`import { ReactFlow } from '@xyflow/react';\`
-    • **@react-three/fiber ^9.0.0 and @react-three/drei ^10.0.0 require react ^19 and will not work with react ^18.**
-        - Please upgrade react to 19 to use these packages.
-        - With react 18, it will throw runtime error: Cannot read properties of undefined (reading 'S')
-
+    • **Django & DRF:** Projects assume Django 5.x with Django REST Framework 3.15+. Use `from django.urls import path, include` and register DRF routers in `api_urls.py` to keep separation clean.
+    • **HTMX:** Include `hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'` or rely on the global `htmx:config` script to attach CSRF tokens. Remember to add indicators via `hx-indicator` and handle errors with `hx-on::error`.
+    • **Static Bundling:** If Vite/Webpack is installed, run the build to generate `manifest.json`. Load assets via a helper like `{% vite_asset "main.ts" %}` or by parsing the manifest.
+    • **Tailwind/PostCSS:** Ensure `tailwind.config.js` paths include Django templates (e.g., `templates/**/*.html`). Regenerate CSS when templates change.
+    • **Celery/Background Tasks:** When installed, configure broker URLs through environment variables. Provide fallback synchronous execution in development.
     • **No support for websockets and dynamic imports may not work, so please avoid using them.**
-</COMMON DEPENDENCY DOCUMENTATION>
+</COMMON DEPENDENCY DOCUMENTATION>`
 `,
     COMMANDS: `<SETUP COMMANDS>
     • **Provide explicit commands to install necessary dependencies ONLY.** DO NOT SUGGEST MANUAL CHANGES. These commands execute directly.
